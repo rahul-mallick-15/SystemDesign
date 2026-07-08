@@ -68,3 +68,45 @@ The database structure changes based on how users are allowed to search.
 - What it is: Combining multiple terms using logic operators like AND, OR, or NOT.
 - Example: Searching for "pizza" AND "pepperoni" NOT "anchovies".
 - Database impact: Complex. The database must look up the list for "pizza", look up the list for "pepperoni", and perform a mathematical intersection (finding URLs present in both lists) while filtering out the "anchovies" list. The database needs fast bitset operations or sorted pointer merging to do this instantly.
+
+```
+"This tells you if the index can fit in RAM for speed or if it must live on disk."
+"Index Database"
+What is the meaning of "index" here ?
+Say for simplicity, we want to do the web indexing based on words in the web page, what will be the input and output ?
+```
+
+The Meaning of "Index" Here
+<br>
+In this specific context, "index" refers to the database itself—specifically, the Inverted Index data structure.When people say "the index fits in RAM," they mean the entire dictionary of words and their corresponding lists of web page links is small enough to load into a computer's fast working memory. If it is too massive, it must be saved onto slower, long-term storage drives (disks).
+
+Input and Output for Word-Based Web Indexing
+<br>
+If we strip away all complexity and focus strictly on indexing words, the process looks like a pipeline with a clear input and a clear output.
+<br>
+[INPUT] Raw HTML Pages ───► [INDEXING SYSTEM] ───► [OUTPUT] Inverted Index Database
+
+1. The Input
+   The input is a massive collection of unstructured, raw web pages fetched from the internet.Format: Raw HTML text files.
+   Example Input Data:
+
+- Page 1 (://pizza.com): "We make the best hot pizza."
+- Page 2 (://cooking.com): "Learn the art of cooking pizza."
+
+2. The Processing (What the system does)
+   The indexing system cleans the input. It strips out HTML tags, removes common filler words (like "we", "the", "of"), converts everything to lowercase, and splits the sentences into individual words.
+
+3. The Output
+   The output is a structured database (the Inverted Index) that maps each unique word to a list of IDs or URLs where that word can be found.
+   Format: A Key-Value lookup table.
+
+   Example Output Data:
+   <br>
+   Key (Word) Value (List of URLs)
+   - "make"[://pizza.com]
+   - "best"[://pizza.com]
+   - "hot"[://pizza.com]
+   - "pizza"[://pizza.com, ://cooking.com]
+   - "learn"[://cooking.com]
+   - "art"[://cooking.com]
+   - "cooking"[://cooking.com]
