@@ -110,3 +110,48 @@ If we strip away all complexity and focus strictly on indexing words, the proces
    - "learn"[://cooking.com]
    - "art"[://cooking.com]
    - "cooking"[://cooking.com]
+
+```
+"Scale and Storage (The "Fit in RAM" problem)"
+As of now we don't even know how much data will come from one page, is it possible to think about sharding of the inverted index (word -> url) ?
+One url could be contains 1000s of words, meaning with 2 urls we could end up at  1500 indexes ?
+```
+
+You cannot design the sharding strategy until you calculate the size of the data coming from those pages. This step is called Back-of-the-Envelope Estimation. Before building anything, you must pause and do the math to see exactly how big your inverted index will become.
+
+If Website A has 1,000 words and Website B has 1,000 words, many of those words will overlap (like "the", "is", "pizza").Instead of 2,000 separate rows in our database, the overlapping words collapse into single rows with a list of URLs.
+
+- Unique Words (Vocabulary): This grows slowly because human languages have a limited number of words.
+- The URL Lists (Posting Lists): This list grows longer and longer with every new website we index.
+
+Doing the Math: How Big is Google's Index?
+<br>
+Let’s estimate the storage required for a Google-scale Inverted Index using standard interview assumptions.
+
+1. The Raw Numbers
+
+- Number of Web Pages: Let's assume Google indexes 100 Billion pages.
+- Unique Words in Vocabulary: Let's assume there are 10 Million unique words (including names, numbers, and codes).
+- Average Words per Page: Let's say a standard webpage has 1,000 words.
+
+2. Calculating the Total Connections
+   If we have 100 Billion pages, and each page has 1,000 words, our system has to process a grand total of:
+
+- 100 Billion pages x 1,000 words/page = 100 Trillion word-to-URL connections
+
+3. How Much Data (Bytes) is That?
+   Every single time a word links to a URL, we need to store a unique identifier for that website (a Document ID). Let's assume a standard 64-bit integer ID, which takes up 8 Bytes of space.
+
+- 100 Trillion connections x 8 Bytes = 800 Terabytes of raw data
+  <br>
+  If you add metadata like word positions (for exact phrase matching) and PageRank scores, this number easily multiplies by 5 to 10 times, pushing the index size into 4 to 8 Petabytes (4,000 to 8,000 Terabytes).
+
+Can We Fit This in RAM?
+<br>
+A single, very powerful modern server can hold about 1 to 2 Terabytes of RAM.Our index requires hundreds or thousands of Terabytes.Because 800+ Terabytes cannot physically fit into the memory of a single computer, it is mathematically impossible to run Google Search on one machine.
+
+Now, We Are Ready for Sharding
+Now that we have done the estimation, we know why we must shard. We have a 4-Petabyte database that needs to be sliced up and distributed across thousands of separate computers.We can split this pie in two ways:
+
+- Term-Based Sharding: Server 1 holds words A-D, Server 2 holds E-H, etc.
+- Document-Based Sharding: Server 1 holds the index for Websites 0-1 Million, Server 2 holds Websites 1 Million to 2 Million, etc.
