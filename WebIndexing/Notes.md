@@ -155,3 +155,77 @@ Now that we have done the estimation, we know why we must shard. We have a 4-Pet
 
 - Term-Based Sharding: Server 1 holds words A-D, Server 2 holds E-H, etc.
 - Document-Based Sharding: Server 1 holds the index for Websites 0-1 Million, Server 2 holds Websites 1 Million to 2 Million, etc.
+
+```
+Term Sharding would mean words like "world cup" and "election" spikes would overload corresponding servers where they are stored
+But "document sharding", would allow more distribution since corresponding servers could be in many numbers, but how will the search work here ?
+
+Does every search need to be forwarded to all servers, since the results need to come from all servers ? Or it just needs to be the first server ?
+```
+
+Analysis of Term Sharding is exactly why companies like Google avoid it for core search—popular words create massive traffic bottlenecks on specific servers.
+<br>
+In Document sharding, because the data is split by website ID, the index entries for a word like "election" are scattered across every single server in your cluster. This completely spreads out the traffic load.
+
+<b>How do we find anything without asking everyone?</b>
+
+The Reality: Yes, You Have to Ask Every Single Server
+<br>
+In a standard Document-Sharded system, a single search query must be sent to all servers (or a large subset of them) simultaneously.
+<br>
+This process uses a pattern called Scatter-Gather. Here is exactly how it works when a user searches for the word "pizza":
+
+```
+                  [ User Types: "pizza" ]
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │  Load Balancer  │
+                    └────────┬────────┘
+                             │
+            ┌────────────────┼────────────────┐
+            ▼                ▼                ▼
+     ┌────────────┐   ┌────────────┐   ┌────────────┐
+     │  Server 1  │   │  Server 2  │   │  Server 3  │  (SCATTER)
+     │ (Docs 1-1M)│   │(Docs 1M-2M)│   │(Docs 2M-3M)│
+     └──────┬─────┘   └──────┬─────┘   └──────┬─────┘
+            │                │                │
+            └────────────────┼────────────────┘
+                             ▼
+                    ┌─────────────────┐
+                    │ Aggregator Node │                (GATHER)
+                    └────────┬────────┘
+                             │ Top 10 Results
+                             ▼
+                    [ User Sees Results ]
+```
+
+- Scatter: A central coordinator server (the Aggregator) receives the query "pizza". It broadcasts this query to all 1,000 servers at the same time.
+- Local Search: Each individual server looks through its own tiny index. Server 1 looks up "pizza" only for websites #1 to #1,000,000. It finds its own local top results.
+- Gather: Each server sends its top results back to the Aggregator.
+- Merge: The Aggregator sorts the incoming results, picks the absolute best 10 pages, translates those 64-bit Document IDs back into real text URLs, and sends them to the user.
+
+<h4> Why Asking Every Server is Actually a Good Thing</h4>
+At first glance, hitting 1,000 servers for a single search sounds terrible. However, it is incredibly efficient for two reasons:
+
+- True Parallelism: Instead of one giant database struggling to read a massive list on a slow hard drive, 1,000 cheap computers are reading tiny, bite-sized files simultaneously. The search finishes in a fraction of the time.
+- No Single Bottleneck: If "world cup" trends, all 1,000 servers share 1/1,000th of the work. No single machine catches fire.
+
+<h4> The Problem of "The Slowest Link" </h4>
+While Document Sharding is great, it introduces a major engineering problem known as the Tail Latency or Long Pole problem.If your search engine has to wait for all 1,000 servers to reply before showing the user a page, your overall search speed is entirely dictated by the slowest single server in the network. If Server #547 gets stuck or encounters a hardware hiccup, the user's search freezes.
+
+<h5>The Roadblock: Why We Can't Just Stop Early </h5>
+In a standard database, if you need 10 records, you can stop as soon as you find any 10 records. But Google is a ranked search engine. The user doesn't just want any 10 pages containing the word "pizza"—they want the absolute best 10 pages on the entire internet.If the server holding the absolute #1 best result (like wikipedia.org/wiki/Pizza) happens to be the slow server, and your aggregator cuts off early to return results from faster servers, the user gets a page of low-quality, irrelevant websites.Because we cannot sort the top 10 accurately until we hear from everyone, we cannot easily use a simple "stop-as-soon-as-we-have-10" approach.
+
+<h5> How Google Actually Solves It: The 3 Industry Workarounds </h5>
+
+Instead of stopping early and risking bad results, Google and other major search engines use three specific engineering tactics to beat the "slowest link" problem:
+
+1. <h6>Hedged Requests (The Backup Query)</h6>
+   This is a brilliant technique pioneered by Google’s infrastructure teams.The Aggregator sends the search query to Server A.If Server A does not reply within a tiny threshold (say, 15 milliseconds), the Aggregator assumes Server A is having a bad day.It immediately sends the exact same query to a backup replica (Server A-copy).Whichever server replies first wins, and the slower request is cancelled. This prevents a single hardware hiccup from ruining the search speed.
+
+2. <h6> Graceful Degradation (Dropping the Tail) </h6>
+   If the backup request also fails or takes too long, and a hard timeout is reached (e.g., 200 milliseconds), the aggregator finally chooses to drop that server's data.It will merge the results from the other 999 servers and show them to the user.Missing 0.1% of the internet for a split second is better than keeping a human being waiting in front of a blank, loading screen.
+
+3. <h6> Caching Popular Queries </h6>
+   The easiest way to avoid the slow server problem is to not hit the servers at all.Millions of people search for identical words like "weather" or "pizza" every day.Google saves the pre-compiled top 10 results for these popular keywords in a super-fast Global Cache memory layer.If a search hits the cache, it bypasses the 1,000 document servers entirely.
