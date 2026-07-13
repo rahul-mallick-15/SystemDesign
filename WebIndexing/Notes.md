@@ -229,3 +229,46 @@ Instead of stopping early and risking bad results, Google and other major search
 
 3. <h6> Caching Popular Queries </h6>
    The easiest way to avoid the slow server problem is to not hit the servers at all.Millions of people search for identical words like "weather" or "pizza" every day.Google saves the pre-compiled top 10 results for these popular keywords in a super-fast Global Cache memory layer.If a search hits the cache, it bypasses the 1,000 document servers entirely.
+
+```
+Do you update the index files live (which causes data locking and slow searches), or do you write new, separate index files and merge them later using background workers (like a Log-Structured Merge-tree or MapReduce architecture)?
+```
+
+Because our index is stored as highly optimized, sorted lists of numbers (Document IDs), inserting a single new website into the middle of a sorted file forces the computer to rewrite the entire rest of that file on the disk. Doing this billions of times a day is incredibly slow and wears out hardware.
+<br>
+Instead, systems like Google use Immutability—meaning they never modify an existing file. They only write new ones. This is where Log-Structured Merge-trees (LSM-Trees) and MapReduce come into play.
+
+1. <h4> Log-Structured Merge-tree (LSM-Tree) </h4>
+   An LSM-Tree is a database design pattern optimized for incredibly fast writes. Instead of updating a giant file on the disk immediately, it breaks the process into two stages:
+
+- Write to Memory (Fast): When new web pages are indexed, the changes are written to a fast, sorted structure inside the computer’s RAM (called a MemTable). Because it is in memory, this is nearly instant.
+- Flush to Disk (Immutable): Once the memory fills up, the system flushes that sorted data down to the hard drive as a permanent, unchangeable file called an SSTable.
+
+<b>The Problem</b>: Too Many Small Files
+<br>
+Over time, you end up with hundreds of tiny, separate index files on your disk. If a user searches for "pizza", the server has to look inside every single one of those files, which slows down search speeds.
+
+<b>The Solution</b>: Compaction (The "Merge" part)
+<br>
+In the background, a separate system continually reads these small, sorted files, merges them together into one large, perfectly ordered file, and deletes the old duplicates. This ensures search reads remain lightning fast without ever locking up the live database.
+
+2. <h4>MapReduce Architecture</h4>
+   While LSM-Trees handle continuous updates on individual servers, MapReduce is a framework used to process and index the entire internet all at once in massive daily or weekly batches. It was invented by Google to solve the exact problem we are discussing
+
+It breaks a massive data problem down into two simple steps across thousands of computers: Map and Reduce.
+
+<h6>Step 1: Map (Break down the data)</h6>
+Thousands of worker computers take raw web pages downloaded by the crawler and break them down into basic key-value pieces.
+
+`Input page: site-A.com contains "pizza recipe"`<br>
+`Map Output: ("pizza", site-A.com), ("recipe", site-A.com)`
+
+<h6>Step 2: Shuffle & Sort (Organize behind the scenes)</h6>
+The MapReduce framework automatically groups all identical words together from every single mapping computer and sends them to the designated final processor.
+
+<h6>Step 3: Reduce (Glue it together)</h6>
+Another set of computers takes all the scattered references to a single word and condenses them into a single, clean list.
+
+`Before Reduce: ("pizza", site-A.com), ("pizza", site-B.com)`<br>
+`Reduce Output: "pizza" -> [site-A.com, site-B.com]`<br>
+Once the Reduce step finishes, a brand new, perfectly optimized index database file is generated and pushed to the live search servers.
