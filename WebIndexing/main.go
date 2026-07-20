@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -23,4 +24,32 @@ func NewInvertedIndex() *InvertedIndex {
 		store: make(map[string][]int64),
 		urls:  make(map[int64]string),
 	}
+}
+
+// tokenize takes a raw string, cleans punctuation, and returns lowercase unique
+func tokenize(text string) []string {
+	// 1. Convert everything to lowercase
+	lowerText := strings.ToLower(text)
+
+	// 2. Split the text into individual words by spaces
+	words := strings.Fields(lowerText)
+
+	// 3. Track unique words to avoid duplicate entries per document
+	uniqueWords := make(map[string]bool)
+	var cleanedWords []string
+
+	for _, word := range words {
+		// Clean trailing/leading punctuation symbols
+		cleaned := strings.Trim(word, ".,!?;:()\"'")
+
+		// Skip empty entries or words we have already processed for this page
+		if cleaned == "" || uniqueWords[cleaned] {
+			continue
+		}
+
+		uniqueWords[cleaned] = true
+		cleanedWords = append(cleanedWords, cleaned)
+	}
+
+	return cleanedWords
 }
