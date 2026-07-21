@@ -53,3 +53,21 @@ func tokenize(text string) []string {
 
 	return cleanedWords
 }
+
+// IndexDocument processes a page, tracks its URL, and appends its ID to word list
+func (idx *InvertedIndex) IndexDocument(doc Document) {
+	// 1. Acquire a full Write Lock to prevent simultaneous read/write crashes
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// 2. Save the lightweight Document ID -> URL mapping in the master registry
+	idx.urls[doc.ID] = doc.URL
+
+	// 3. Clean and isolate the words using the Tokenizer
+	cleanWords := tokenize(doc.Content)
+
+	// 4. Update the inverted index mapping for each unique word found
+	for _, word := range cleanWords {
+		idx.store[word] = append(idx.store[word], doc.ID)
+	}
+}
