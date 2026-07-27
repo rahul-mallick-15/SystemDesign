@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"sync"
 )
@@ -17,6 +19,17 @@ type InvertedIndex struct {
 	mu    sync.RWMutex       // Controls concurrent memory access (Read-Write Lock)
 	store map[string][]int64 // The Inverted Index: maps a Word -> list of Document IDs
 	urls  map[int64]string   // The Master Registry: maps a Document ID -> original text url
+}
+
+// ShardSearchRequest represents the query sent over the network to this node.
+type ShardSearchRequest struct {
+	Query string `json:"query"`
+}
+
+// ShardSearchResponse represents the local matches found by this specific node.
+type ShardSearchResponse struct {
+	ShardID int     `json:"shard_id"` // Helps track which server sent the data
+	DocIDs  []int64 `json:"doc_ids"`  // The matching integer IDs found locally
 }
 
 func NewInvertedIndex() *InvertedIndex {
@@ -95,6 +108,39 @@ func (idx *InvertedIndex) Search(keyword string) []string {
 	}
 
 	return results
+}
+
+// ServeHTTP makes InvertedIndex compatible with Go's standard web server.
+func (idx *InvertedIndex) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 1. Enforce that this endpoint only accepts HTTP POST requests
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 2. Decode the incoming JSON payload safely
+	var req ShardSearchRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || req.Query == "" {
+		http.Error(w, "Bad request payload", http.StatusBadRequest)
+		return
+	}
+
+	// 3. Query local memory dictionary
+	idx.mu.RLock()
+	cleanQuery := strings.ToLower(req.Query)
+	localIDs := idx.store[cleanQuery]
+	idx.mu.RUnlock()
+
+	// 4. Package the results up into our network response format
+	resp := ShardSearchResponse{
+		ShardID: 1, // hardcoded for this single node
+		DocIDs:  localIDs,
+	}
+
+	// 5. Send the structured JSON response back over the network connection
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func main() {
