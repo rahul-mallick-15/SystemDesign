@@ -71,3 +71,28 @@ func (idx *InvertedIndex) IndexDocument(doc Document) {
 		idx.store[word] = append(idx.store[word], doc.ID)
 	}
 }
+
+// Search looks up a keyword and returns a list of matching website URLs.
+func (idx *InvertedIndex) Search(keyword string) []string {
+	// 1. Acquire a Read Lock to allow multiple users to search simulataneous
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	// 2. Normalise the search keyword to lowercase
+	cleanQuery := strings.ToLower(keyword)
+
+	// 3. Look up the keyword in our inverted index dictionary
+	docIDs, found := idx.store[cleanQuery]
+
+	if !found {
+		return nil // Return empty if the word doesn't exist on the internet
+	}
+
+	// 4. Translate the 64-bit integer IDs back into real text URLs
+	results := make([]string, len(docIDs))
+	for i, id := range docIDs {
+		results[i] = idx.urls[id]
+	}
+
+	return results
+}
