@@ -96,3 +96,18 @@ func (idx *InvertedIndex) Search(keyword string) []string {
 
 	return results
 }
+
+func main() {
+	engine := NewInvertedIndex()
+
+	// Index sample data
+	engine.IndexDocument(Document{ID: 1, URL: "://recipes.com", Content: "best pizza recipe"})
+	engine.IndexDocument(Document{ID: 2, URL: "://eats.com", Content: "order pizza online"})
+
+	// Search
+	results := engine.Search("pizza")
+	println("Search results for 'pizza'")
+	for _, url := range results {
+		println("->", url)
+	}
+}
