@@ -144,16 +144,23 @@ func (idx *InvertedIndex) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	engine := NewInvertedIndex()
+	// 1. Boot up a clean, isolated database shard engine instance
+	shardServer := NewInvertedIndex()
 
-	// Index sample data
-	engine.IndexDocument(Document{ID: 1, URL: "://recipes.com", Content: "best pizza recipe"})
-	engine.IndexDocument(Document{ID: 2, URL: "://eats.com", Content: "order pizza online"})
+	// 2. Pre-populate our local shard database with some mock crawled web data
+	shardServer.IndexDocument(Document{ID: 101, URL: "wikipedia.org/pizza", Content: "pizza history and recipe"})
+	shardServer.IndexDocument(Document{ID: 102, URL: "dominos.com", Content: "order cheesy hot pizza online"})
+	shardServer.IndexDocument(Document{ID: 103, URL: "italy-travel.com", Content: "visit rome for authentic history"})
 
-	// Search
-	results := engine.Search("pizza")
-	println("Search results for 'pizza'")
-	for _, url := range results {
-		println("->", url)
+	// 3. The network port this database shard will claim
+	serverAddress := "127.0.0.1:8081"
+	println("🚀 Shard Node #1 is online and listening at http://" + serverAddress)
+
+	// 4. Start the blocking network listener loop
+	// This listens for incoming HTTP POST search requests infinitely
+	err := http.ListenAndServe(serverAddress, shardServer)
+	if err != nil {
+		panic("Failed to start database shard network server: " + err.Error())
 	}
+
 }
