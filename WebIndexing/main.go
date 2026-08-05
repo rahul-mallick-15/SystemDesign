@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -30,6 +33,66 @@ type ShardSearchRequest struct {
 type ShardSearchResponse struct {
 	ShardID int     `json:"shard_id"` // Helps track which server sent the data
 	DocIDs  []int64 `json:"doc_ids"`  // The matching integer IDs found locally
+}
+
+// PersistentIndex upgrades engine to manage disk-backed LSM structres
+type PersistentIndex struct {
+	mu       sync.RWMutex
+	memTable map[string][]int64 // Fast, in-memory updates (Active MemTable)
+	urls     map[int64]string   // Master ID -> URL registry
+	dataDir  string             // The directory path on your hard drive to save index files
+	walFile  *os.File           // The Write-Ahead Log file pointer
+}
+
+// NewPersistentIndex spins up a disk-backed storage engine with an active WAL log.
+func NewPersistentIndex(dataDir string) (*PersistentIndex, error) {
+	// 1. Create the database directory on disk if it doesn't exist
+	err := os.MkdirAll(dataDir, 0755)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Open or create a sequential Write-Ahead Log file (append-only mode)
+	walPath := filepath.Join(dataDir, "wal.log")
+	file, err := os.OpenFile(walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PersistentIndex{
+		memTable: make(map[string][]int64),
+		urls:     make(map[int64]string),
+		dataDir:  dataDir,
+		walFile:  file,
+	}, nil
+}
+
+// SaveDocument commits a crawled document to the WAL disk log first, then updates memory.
+func (p *PersistentIndex) SaveDocument(doc Document) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// 1. Format the data into a simple sequential log line
+	// Format: ID,URL,Content\n
+	logLine := fmt.Sprintf("%d,%s,%s\n", doc.ID, doc.URL, strings.ReplaceAll(doc.Content, "\n", " "))
+
+	// 2. Write-Ahead Log (WAL) Phase: Commit straight to disk storage
+	_, err := p.walFile.WriteString(logLine)
+	if err != nil {
+		return fmt.Errorf("WAL write failure, aborting index: %w", err)
+	}
+
+	// Force the operating system to immediately flush bytes to physical hardware
+	p.walFile.Sync()
+
+	// 3. MemTable Phase: Update our fast, volatile short-term RAM maps
+	p.urls[doc.ID] = doc.URL
+	cleanWords := tokenize(doc.Content)
+	for _, word := range cleanWords {
+		p.memTable[word] = append(p.memTable[word], doc.ID)
+	}
+
+	return nil
 }
 
 func NewInvertedIndex() *InvertedIndex {
