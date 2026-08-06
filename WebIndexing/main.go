@@ -115,11 +115,22 @@ func (p *PersistentIndex) FlushMemTableToDisk() error {
 	p.memTable = make(map[string][]int64)
 	p.urls = make(map[int64]string)
 
-	// Close the current active WAL file so we can cycle it
-	p.walFile.Close()
+	// Cycle the WAL safely INSIDE the lock boundary
+	p.walFile.Close() // Close the old log
 
-	// 2. Release the lock immediately!
-	// New incoming writes/searches can now use the fresh empty maps while we write to disk
+	walPath := filepath.Join(p.dataDir, "wal.log")
+	os.Remove(walPath) // Safely delete the old log while incoming writes are blocked
+
+	// Instantly create the brand new log file
+	newWAL, err := os.OpenFile(walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		p.mu.Unlock()
+		return err
+	}
+	p.walFile = newWAL // Point the engine to the fresh log file
+
+	// 2. Now it is safe to unlock!
+	// Future writes will seamlessly type into the clean memTable and the clean newWAL.
 	p.mu.Unlock()
 
 	// 3. Prepare the unique immutable file name based on current time
@@ -145,20 +156,6 @@ func (p *PersistentIndex) FlushMemTableToDisk() error {
 	if err != nil {
 		return err
 	}
-
-	// 5. Clean up the cycled Write-Ahead Log since its data is now safe inside the index file
-	walPath := filepath.Join(p.dataDir, "wal.log")
-	os.Remove(walPath)
-
-	// Re-open a brand new, clean append-only WAL file for future writes
-	newWAL, err := os.OpenFile(walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-
-	p.mu.Lock()
-	p.walFile = newWAL
-	p.mu.Unlock()
 
 	println("💾 MemTable successfully flushed to immutable disk file: " + fileName)
 	return nil
