@@ -164,6 +164,62 @@ func (p *PersistentIndex) FlushMemTableToDisk() error {
 	return nil
 }
 
+// Search looks in both active memory and all unchangeable disk files
+func (p *PersistentIndex) Search(keyword string) []string {
+	p.mu.RLock()
+	cleanQuery := strings.ToLower(keyword)
+
+	// 1. Gather IDs from the active memory table
+	var combinedIDs []int64
+	combinedIDs = append(combinedIDs, p.memTable[cleanQuery]...)
+
+	// Create a copy of the URL registry for translation later
+	urlRegistryCopy := make(map[int64]string)
+	for k, v := range p.urls {
+		urlRegistryCopy[k] = v
+	}
+	p.mu.RUnlock() // Release the lock early so writes aren't blocked while we read files!
+
+	// 2. Scan the directory for all written immutable files (*.db)
+	files, _ := filepath.Glob(filepath.Join(p.dataDir, "index_*.db"))
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+
+		// Decode the file data
+		var snapshot struct {
+			Store map[string][]int64 `json:"store"`
+			URLs  map[int64]string   `json:"urls"`
+		}
+		json.Unmarshal(data, &snapshot)
+
+		// Append matching IDs from this disk file
+		if ids, found := snapshot.Store[cleanQuery]; found {
+			combinedIDs = append(combinedIDs, ids...)
+		}
+
+		// Merge the file's URL directory into our tracking map
+		for id, url := range snapshot.URLs {
+			urlRegistryCopy[id] = url
+		}
+	}
+
+	// 3. Translate the collected unique IDs back to URLs
+	var finalURLs []string
+	seen := make(map[int64]bool)
+	for _, id := range combinedIDs {
+		if !seen[id] {
+			seen[id] = true
+			if url, exists := urlRegistryCopy[id]; exists {
+				finalURLs = append(finalURLs, url)
+			}
+		}
+	}
+	return finalURLs
+}
+
 func NewInvertedIndex() *InvertedIndex {
 	return &InvertedIndex{
 		store: make(map[string][]int64),
