@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Document represents the raw input data coming from a web crawler.
@@ -92,6 +93,74 @@ func (p *PersistentIndex) SaveDocument(doc Document) error {
 		p.memTable[word] = append(p.memTable[word], doc.ID)
 	}
 
+	return nil
+}
+
+// FlushMemTableToDisk writes the current active RAM index to a permanent immutable file
+func (p *PersistentIndex) FlushMemTableToDisk() error {
+	// 1. Acquire a full Write Lock to snapshot and swap memory pointers safely
+	p.mu.Lock()
+
+	// If memory is empty, nothing to flush
+	if len(p.memTable) == 0 {
+		p.mu.Unlock()
+		return nil
+	}
+
+	// Capture snapshots of our current memory tables
+	oldMemTable := p.memTable
+	oldURLs := p.urls
+
+	// Reset memory tables to clean, empty maps for incoming writes instantly
+	p.memTable = make(map[string][]int64)
+	p.urls = make(map[int64]string)
+
+	// Close the current active WAL file so we can cycle it
+	p.walFile.Close()
+
+	// 2. Release the lock immediately!
+	// New incoming writes/searches can now use the fresh empty maps while we write to disk
+	p.mu.Unlock()
+
+	// 3. Prepare the unique immutable file name based on current time
+	fileName := fmt.Sprintf("index_%d.db", time.Now().UnixNano())
+	filePath := filepath.Join(p.dataDir, fileName)
+
+	// Create and open the permanent disk file
+	diskFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer diskFile.Close()
+
+	// 4. Serialize and save the old snapshot data onto the disk
+	// For simplicity, we package the index map and URL dictionary together as a JSON file
+	type DiskSnapshot struct {
+		Store map[string][]int64 `json:"store"`
+		URLs  map[int64]string   `json:"urls"`
+	}
+	snapshot := DiskSnapshot{Store: oldMemTable, URLs: oldURLs}
+
+	err = json.NewEncoder(diskFile).Encode(snapshot)
+	if err != nil {
+		return err
+	}
+
+	// 5. Clean up the cycled Write-Ahead Log since its data is now safe inside the index file
+	walPath := filepath.Join(p.dataDir, "wal.log")
+	os.Remove(walPath)
+
+	// Re-open a brand new, clean append-only WAL file for future writes
+	newWAL, err := os.OpenFile(walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	p.walFile = newWAL
+	p.mu.Unlock()
+
+	println("💾 MemTable successfully flushed to immutable disk file: " + fileName)
 	return nil
 }
 
